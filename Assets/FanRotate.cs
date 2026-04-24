@@ -2,10 +2,14 @@ using UnityEngine;
 
 public class FanRotate : MonoBehaviour
 {
-    public float speed = 1500f;
+    public float speed = 500f;
+    public bool isOn = false;
 
     void Update()
     {
-        transform.Rotate(0, speed * Time.deltaTime, 0);
+        if (isOn)
+        {
+            transform.Rotate(0, speed * Time.deltaTime, 0);
+        }
     }
 }
