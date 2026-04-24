@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "508550695729",
+    "firebase_url": "https://server-room-digital-twin-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "server-room-digital-twin",
+    "storage_bucket": "server-room-digital-twin.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:508550695729:android:475da5c6c3aa07f1dabe10",
+        "android_client_info": {
+          "package_name": "com.hackathon.serverroom"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCupzs79y3aeRpat7YfhxSZCEEsLkX8L1c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

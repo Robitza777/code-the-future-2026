@@ -1,6 +1,6 @@
+//using Assimp;
+using System;
 using UnityEngine;
-using Firebase;
-using Firebase.Database;
 
 [RequireComponent(typeof(AudioSource))]
 public class ServerRoomManager : MonoBehaviour
@@ -12,8 +12,8 @@ public class ServerRoomManager : MonoBehaviour
     public float vibration = 0f;
 
     [Header("Scene References")]
-    public FanRotate fanScript;        // drag FanPivot here
-    public Transform relayCylinder;    // cilindrul din relay
+    public FanRotate fanScript;      // drag FanPivot here
+    public Transform relayCylinder;  // cilindrul din relay
     public Renderer ledverde;
     public Renderer ledgalben;
     public Renderer ledrosu;
@@ -29,7 +29,6 @@ public class ServerRoomManager : MonoBehaviour
     public Color yellowOn = Color.yellow;
     public Color redOn = Color.red;
 
-    // ── internal state ───────────────────────────────────────
     Vector3 relayStartPos;
     Vector3 relayTargetPos;
 
@@ -42,29 +41,13 @@ public class ServerRoomManager : MonoBehaviour
     const int SAMPLE_RATE = 44100;
     AudioClip beepClip;
 
-    // ── Firebase ──────────────────────────────────────────────
-    DatabaseReference liveRef;
-    DatabaseReference whatifRef;
-    bool firebaseReady = false;
-
-    // date primite din Firebase (actualizate pe main thread)
-    float fb_temp = 25f;
-    float fb_humidity = 50f;
-    float fb_gas = 1000f;
-    float fb_vibration = 0f;
-    bool fb_whatifActive = false;
-
-    // queue pentru main thread
-    readonly System.Collections.Generic.Queue<System.Action> _mainQueue
-        = new System.Collections.Generic.Queue<System.Action>();
-
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void Start()
     {
         relayStartPos = relayCylinder.localPosition;
         relayTargetPos = relayStartPos;
+        relayCylinder.localPosition = relayStartPos;
 
-        // Genereaza beep clip
         int n = Mathf.RoundToInt(SAMPLE_RATE * BEEP_DUR);
         float[] samples = new float[n];
         for (int i = 0; i < n; i++)
@@ -81,119 +64,36 @@ public class ServerRoomManager : MonoBehaviour
         buzzerAudio.playOnAwake = false;
 
         ApplyLeds(false, false);
-
-        // Initializeaza Firebase
-        FirebaseApp.CheckAndFixDependenciesAsync().ContinueWith(task =>
-        {
-            if (task.Result == DependencyStatus.Available)
-            {
-                liveRef = FirebaseDatabase.DefaultInstance.GetReference("serverroom/live");
-                whatifRef = FirebaseDatabase.DefaultInstance.GetReference("serverroom/whatif");
-
-                liveRef.ValueChanged += OnLiveData;
-                whatifRef.ValueChanged += OnWhatIfData;
-
-                firebaseReady = true;
-                Debug.Log("[Firebase] Conectat! Ascult date live...");
-            }
-            else
-            {
-                Debug.LogError("[Firebase] Eroare dependente: " + task.Result);
-            }
-        });
     }
 
-    // ── Callback Firebase LIVE ────────────────────────────────
-    void OnLiveData(object sender, ValueChangedEventArgs e)
-    {
-        if (e.DatabaseError != null)
-        {
-            Debug.LogError("[Firebase] " + e.DatabaseError.Message);
-            return;
-        }
-
-        // Daca whatif e activ, ignoram datele live
-        if (fb_whatifActive) return;
-
-        float t = ParseFloat(e.Snapshot.Child("temp").Value, 25f);
-        float h = ParseFloat(e.Snapshot.Child("humidity").Value, 50f);
-        float g = ParseFloat(e.Snapshot.Child("gas_raw").Value, 1000f);
-        float v = ParseFloat(e.Snapshot.Child("vibration").Value, 0f);
-
-        // Actualizam pe main thread
-        lock (_mainQueue)
-        {
-            _mainQueue.Enqueue(() =>
-            {
-                fb_temp = t;
-                fb_humidity = h;
-                fb_gas = g;
-                fb_vibration = v;
-                ApplySensorValues();
-                Debug.Log($"[Live] T={t:F1} H={h:F1} G={g:F0} V={v:F3}");
-            });
-        }
-    }
-
-    // ── Callback Firebase WHAT IF ─────────────────────────────
-    void OnWhatIfData(object sender, ValueChangedEventArgs e)
-    {
-        if (e.DatabaseError != null) return;
-
-        bool active = ParseBool(e.Snapshot.Child("active").Value);
-        float t = ParseFloat(e.Snapshot.Child("temp").Value, 25f);
-        float h = ParseFloat(e.Snapshot.Child("humidity").Value, 50f);
-        float g = ParseFloat(e.Snapshot.Child("gas_raw").Value, 1000f);
-        float v = ParseFloat(e.Snapshot.Child("vibration").Value, 0f);
-
-        lock (_mainQueue)
-        {
-            _mainQueue.Enqueue(() =>
-            {
-                fb_whatifActive = active;
-                if (active)
-                {
-                    fb_temp = t;
-                    fb_humidity = h;
-                    fb_gas = g;
-                    fb_vibration = v;
-                    ApplySensorValues();
-                    Debug.Log($"[WhatIf] T={t:F1} H={h:F1} G={g:F0} V={v:F3}");
-                }
-            });
-        }
-    }
-
-    // ── Aplica valorile Firebase pe variabilele locale ────────
-    void ApplySensorValues()
-    {
-        temperature = fb_temp;
-        humidity = fb_humidity;
-        gasLevel = fb_gas;
-        vibration = fb_vibration;
-    }
-
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void Update()
     {
-        // Proceseaza coada main thread
-        lock (_mainQueue)
-        {
-            while (_mainQueue.Count > 0)
-                _mainQueue.Dequeue()?.Invoke();
-        }
-
-        // Taste pentru test manual (functioneaza in continuare)
         TestKeys();
         RunLogic();
         MoveRelay();
         HandleBuzzer();
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIMESTE DATE DIN FIREBASE REST
+    // ─────────────────────────────────────────────────────────────────────────
+    public void ReceiveSensorData(string json)
+    {
+        SensorPayload data = JsonUtility.FromJson<SensorPayload>(json);
+        if (data == null) return;
+
+        temperature = data.temp;
+        humidity = data.humidity;
+        gasLevel = data.gas_raw;
+        vibration = data.vibration;
+
+        Debug.Log("[Firebase] Date primite: " + json);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     void TestKeys()
     {
-        // Taste test manual — utile cand Firebase nu e conectat
         if (Input.GetKeyDown(KeyCode.T)) temperature += 2f;
         if (Input.GetKeyDown(KeyCode.Y)) humidity += 5f;
         if (Input.GetKeyDown(KeyCode.G)) gasLevel += 500f;
@@ -213,7 +113,7 @@ public class ServerRoomManager : MonoBehaviour
         }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void RunLogic()
     {
         warningMode = false;
@@ -259,7 +159,7 @@ public class ServerRoomManager : MonoBehaviour
             : relayStartPos;
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void ApplyLeds(bool warning, bool critical)
     {
         if (critical)
@@ -282,7 +182,7 @@ public class ServerRoomManager : MonoBehaviour
         }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void MoveRelay()
     {
         relayCylinder.localPosition = Vector3.Lerp(
@@ -292,14 +192,20 @@ public class ServerRoomManager : MonoBehaviour
         );
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void HandleBuzzer()
     {
         float interval;
 
-        if (criticalMode) interval = 0.5f;
-        else if (warningMode) interval = 1.5f;
-        else { beepTimer = 0f; return; }
+        if (criticalMode)
+            interval = 0.5f;
+        else if (warningMode)
+            interval = 1.5f;
+        else
+        {
+            beepTimer = 0f;
+            return;
+        }
 
         beepTimer += Time.deltaTime;
         if (beepTimer >= interval)
@@ -310,10 +216,11 @@ public class ServerRoomManager : MonoBehaviour
         }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     void SetLed(Renderer rend, Color c)
     {
         if (rend == null) return;
+
         UnityEngine.Material mat = rend.material;
         mat.color = c;
 
@@ -324,28 +231,29 @@ public class ServerRoomManager : MonoBehaviour
 
         if (mat.HasProperty("_EmissionColor"))
         {
-            if (isOff) { mat.SetColor("_EmissionColor", Color.black); mat.DisableKeyword("_EMISSION"); }
-            else { mat.SetColor("_EmissionColor", c * 2f); mat.EnableKeyword("_EMISSION"); }
+            if (isOff)
+            {
+                mat.SetColor("_EmissionColor", Color.black);
+                mat.DisableKeyword("_EMISSION");
+            }
+            else
+            {
+                mat.SetColor("_EmissionColor", c * 2f);
+                mat.EnableKeyword("_EMISSION");
+            }
         }
     }
+}
 
-    // ─────────────────────────────────────────────────────────
-    void OnDestroy()
-    {
-        if (liveRef != null) liveRef.ValueChanged -= OnLiveData;
-        if (whatifRef != null) whatifRef.ValueChanged -= OnWhatIfData;
-    }
-
-    // ── Helpers parse ─────────────────────────────────────────
-    float ParseFloat(object val, float fallback)
-    {
-        if (val == null) return fallback;
-        return float.TryParse(val.ToString(), out float r) ? r : fallback;
-    }
-
-    bool ParseBool(object val)
-    {
-        if (val == null) return false;
-        return val.ToString().ToLower() == "true";
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL JSON DIN FIREBASE
+// ─────────────────────────────────────────────────────────────────────────────
+[Serializable]
+public class SensorPayload
+{
+    public float temp;
+    public float humidity;
+    public float gas_raw;
+    public float vibration;
+    public string state;
 }
